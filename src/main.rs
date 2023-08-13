@@ -45,7 +45,8 @@ fn main() -> ! {
 
     // Define some simple PIO program.
     let program = pio_proc::pio_asm!(
-        "set x, 31",
+        "pull block",
+        "mov x, osr",
         ".wrap_target",
         "mov y, x",
         "set pins, 1",
@@ -62,13 +63,14 @@ fn main() -> ! {
     let (mut pio, sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
     let installed = pio.install(&program.program).unwrap();
     let (int, frac) = (0, 0); // as slow as possible (0 is interpreted as 65536)
-    let (mut sm, _, _) = rp2040_hal::pio::PIOBuilder::from_program(installed)
+    let (mut sm, _, mut tx) = rp2040_hal::pio::PIOBuilder::from_program(installed)
         .set_pins(led_pin_id, 1)
         .clock_divisor_fixed_point(int, frac)
         .build(sm0);
 
     sm.set_pindirs([(led_pin_id, hal::pio::PinDir::Output)]);
     sm.start();
+    tx.write(100u32);
     // PIO runs in background, independently from CPU
     loop {
         defmt::error!("hello");
