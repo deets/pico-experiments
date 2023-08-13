@@ -44,33 +44,23 @@ fn main() -> ! {
     let led_pin_id = 17;
 
     // Define some simple PIO program.
-    const MAX_DELAY: u8 = 31;
-    let mut a = pio::Assembler::<32>::new();
-    let mut wrap_target = a.label();
-    let mut wrap_source = a.label();
-    // Set pin as Out
-    a.set(pio::SetDestination::PINDIRS, 1);
-    // Define begin of program loop
-    a.bind(&mut wrap_target);
-    // Set pin low
-    a.set_with_delay(pio::SetDestination::PINS, 0, MAX_DELAY);
-    // Set pin high
-    a.set_with_delay(pio::SetDestination::PINS, 1, MAX_DELAY);
-    // Define end of program loop
-    a.bind(&mut wrap_source);
-    // The labels wrap_target and wrap_source, as set above,
-    // define a loop which is executed repeatedly by the PIO
-    // state machine.
-    let program = a.assemble_with_wrap(wrap_source, wrap_target);
+    let program = pio_proc::pio_asm!(
+        ".wrap_target",
+        "set pins, 1 [31]",
+        "set pins, 0 [31]",
+        ".wrap"
+    );
 
     // Initialize and start PIO
     let (mut pio, sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
-    let installed = pio.install(&program).unwrap();
+    let installed = pio.install(&program.program).unwrap();
     let (int, frac) = (0, 0); // as slow as possible (0 is interpreted as 65536)
-    let (sm, _, _) = rp2040_hal::pio::PIOBuilder::from_program(installed)
+    let (mut sm, _, _) = rp2040_hal::pio::PIOBuilder::from_program(installed)
         .set_pins(led_pin_id, 1)
         .clock_divisor_fixed_point(int, frac)
         .build(sm0);
+
+    sm.set_pindirs([(led_pin_id, hal::pio::PinDir::Output)]);
     sm.start();
 
     // PIO runs in background, independently from CPU
