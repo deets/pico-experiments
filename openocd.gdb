@@ -20,5 +20,11 @@ monitor arm semihosting enable
 load
 
 # start the process but immediately halt the processor
+
+monitor rp2040.core0 rtt setup 0x2003fbc0 0x30 "SEGGER RTT"
+monitor rtt start
+monitor rtt server start 3334 0
+
 continue
+
 
