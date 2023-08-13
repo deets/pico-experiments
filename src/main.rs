@@ -45,9 +45,16 @@ fn main() -> ! {
 
     // Define some simple PIO program.
     let program = pio_proc::pio_asm!(
+        "set x, 31",
         ".wrap_target",
-        "set pins, 1 [31]",
-        "set pins, 0 [31]",
+        "mov y, x",
+        "set pins, 1",
+        "high:",
+        "jmp y-- high",
+        "mov y, x",
+        "set pins, 0",
+        "low:",
+        "jmp y-- low",
         ".wrap"
     );
 
@@ -62,7 +69,6 @@ fn main() -> ! {
 
     sm.set_pindirs([(led_pin_id, hal::pio::PinDir::Output)]);
     sm.start();
-
     // PIO runs in background, independently from CPU
     loop {
         defmt::error!("hello");
