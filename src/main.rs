@@ -39,36 +39,29 @@ fn main() -> ! {
     );
 
     // configure LED pin for Pio0.
-    let _led: Pin<_, FunctionPio0> = pins.gpio17.into_mode();
-    let _led: Pin<_, FunctionPio0> = pins.gpio18.into_mode();
+    let _led_pin: Pin<_, FunctionPio0> = pins.gpio17.into_mode();
+    let _other_pin: Pin<_, FunctionPio0> = pins.gpio18.into_mode();
     // PIN id for use inside of PIO
     let led_pin_id = 17;
     let other_pin = 18;
 
-    // // Define some simple PIO program.
-    // let program = pio_proc::pio_asm!(
-    //     "pull block",
-    //     "mov x, osr",
-    //     ".wrap_target",
-    //     "mov y, x",
-    //     "set pins, 1",
-    //     "high:",
-    //     "jmp y-- high",
-    //     "mov y, x",
-    //     "set pins, 0",
-    //     "low:",
-    //     "jmp y-- low",
-    //     ".wrap"
-    // );
-
     // Define some simple PIO program.
-    let short_high = pio_proc::pio_asm!(
+    let x_controlled_pulse = pio_proc::pio_asm!(
+        "pull block",
+        "mov x, osr",
         ".wrap_target",
-        "set pins, 1 [3]",
-        "set pins, 0 [31]",
+        "mov y, x",
+        "set pins, 1",
+        "high:",
+        "jmp y-- high",
+        "mov y, x",
+        "set pins, 0",
+        "low:",
+        "jmp y-- low",
+        "mov isr, x",
+        "push noblock",
         ".wrap"
     );
-
 
     let long_high = pio_proc::pio_asm!(
         ".wrap_target",
@@ -80,10 +73,10 @@ fn main() -> ! {
 
     // Initialize and start PIO
     let (mut pio, sm0, sm1, _, _) = pac.PIO0.split(&mut pac.RESETS);
-    let short_high_installed = pio.install(&short_high.program).unwrap();
+    let x_controlled_pulse_installed = pio.install(&x_controlled_pulse.program).unwrap();
     let long_high_installed = pio.install(&long_high.program).unwrap();
     let (int, frac) = (0, 0); // as slow as possible (0 is interpreted as 65536)
-    let (mut sm0, _, mut tx1) = rp2040_hal::pio::PIOBuilder::from_program(short_high_installed)
+    let (mut sm0, mut rx0, mut tx0) = rp2040_hal::pio::PIOBuilder::from_program(x_controlled_pulse_installed)
         .set_pins(other_pin, 1)
         .clock_divisor_fixed_point(int, frac)
         .build(sm0);
@@ -99,9 +92,11 @@ fn main() -> ! {
 
     sm1.set_pindirs([(led_pin_id, hal::pio::PinDir::Output)]);
     sm1.start();
-    tx1.write(10u32);
+    tx0.write(10u32);
     // PIO runs in background, independently from CPU
     loop {
-        defmt::error!("loop");
+        if let Some(value) = rx0.read() {
+            defmt::error!("got fifo value: {}", value);
+        }
     }
 }
