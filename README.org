@@ -1,0 +1,29 @@
+* Pico Rust Programming Example
+
+A small test project to play around with Rust and it's PIOs.
+
+It is designed to measure distance with a HC-SR04 and print
+the results in cms via RTT.
+
+** Setup
+
+I'm using the Pico-as-Picoprobe setup, see https://reltech.substack.com/p/getting-started-with-rust-on-a-raspberry
+
+To establish an OCD connection, run =./run-openocd.sh= in a shell.
+
+** Compile and upload
+
+Just the usual =cargo build= and then =cargo run=
+
+Run these via GDB:
+
+#+begin_src bash
+monitor rp2040.core0 rtt setup 0x2003fbc0 0x30 "SEGGER RTT"
+monitor rtt start
+monitor rtt server start 3334 0
+#+end_src
+
+Run this to decode:
+#+begin_src bash
+nc localhost 3334 | ./target/debug/defmt-print -e /home/deets/projects/private/hc-sr04-experiments/target/thumbv6m-none-eabi/debug/hc-sr04-experiments
+#+end_src
