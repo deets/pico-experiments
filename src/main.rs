@@ -76,8 +76,14 @@ fn main() -> ! {
         ".wrap_target",
         "set pins, 1 [31]",
         "set pins, 0 [31]",
+        "mov y !null",
         "wait 1 pin 0",
-        "wait 0 pin 0 [31]",
+        "count:",
+        "jmp y-- decrement",
+        "decrement:",
+        "jmp pin count",
+        "mov isr y",
+        "push block" ,
         ".wrap"
     );
 
@@ -86,7 +92,7 @@ fn main() -> ! {
     let (mut pio, trigger_sm, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
     let trigger_installed = pio.install(&trigger_program.program).unwrap();
     let (int, frac) = (div, 0); // as slow as possible (0 is interpreted as 65536)
-    let (mut trigger_sm, _, mut trigger_tx) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
+    let (mut trigger_sm, mut trigger_rx, mut trigger_tx) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
         .set_pins(trigger_pin, 1)
         .in_pin_base(echo_pin)
         .jmp_pin(echo_pin)
@@ -94,15 +100,18 @@ fn main() -> ! {
         .build(trigger_sm);
 
     trigger_sm.set_pindirs([(trigger_pin, hal::pio::PinDir::Output), (echo_pin, hal::pio::PinDir::Input)]);
-    let trigger_sm = trigger_sm.start();
+    trigger_sm.start();
 
     // PIO runs in background, independently from CPU
     trigger_tx.write(wait_for_echo);
     loop {
-        // if let Some(value) = rx0.read() {
-        //     defmt::error!("got fifo value: {}", value);
-        // }
-        // let freq = clocks.system_clock.freq().raw();
-        defmt::error!("pos: {}", trigger_sm.instruction_address());
+        if let Some(value) = trigger_rx.read() {
+            // We have two instructions in the count loop,
+            // thus the total number of spent instructions
+            let elapsed_instruction_count = (u32::MAX - value) * 2;
+            let elapsed_clock_cycles = elapsed_instruction_count * div as u32;
+            let elapsed_seconds = elapsed_clock_cycles as f32 / freq as f32;
+            defmt::error!("seconds: {}, centimeters: {}", elapsed_seconds, elapsed_seconds * 330.0 * 100.0);
+        }
     }
 }
