@@ -11,7 +11,7 @@ use hal::Sio;
 use panic_probe as _;
 use rp2040_hal as hal;
 use defmt_rtt as _; // defmt transport
-use hal::clocks::{Clock, ClockSource, ClocksManager, StoppableClock};
+use hal::clocks::{Clock, ClocksManager};
 
 
 /// The linker will place this boot block at the start of our program image. We
@@ -48,30 +48,13 @@ fn main() -> ! {
     );
 
     // configure LED pin for Pio0.
-    let _led_pin: Pin<_, FunctionPio0> = pins.gpio17.into_mode();
-    let _other_pin: Pin<_, FunctionPio0> = pins.gpio18.into_mode();
+    let _trigger_pin: Pin<_, FunctionPio0> = pins.gpio17.into_mode();
+    let _echo_pin: Pin<_, FunctionPio0> = pins.gpio18.into_mode();
     // PIN id for use inside of PIO
-    let led_pin_id = 18;
+    let echo_pin = 18;
     let trigger_pin = 17;
 
     // Define some simple PIO program.
-    let x_controlled_pulse = pio_proc::pio_asm!(
-        "pull block",
-        "mov x, osr",
-        ".wrap_target",
-        "mov y, x",
-        "set pins, 1",
-        "high:",
-        "jmp y-- high",
-        "mov y, x",
-        "set pins, 0",
-        "low:",
-        "jmp y-- low",
-        "mov isr, x",
-        "push noblock",
-        ".wrap"
-    );
-
     // I want the pulse of 31 highs to be
     // ~16us. freq / 1000_000 is the number
     // of clocks for 1us, times 16 the number of clocks
@@ -80,43 +63,46 @@ fn main() -> ! {
     // TODO: currently I need an additional divider 2, why?
     let freq = clocks.system_clock.freq().raw();
     let div = (16 * freq / 1000_000 / 31 / 2) as u16;
+    // The spec says that in case no echo is received,
+    // we get a 200ms pulse. Let's use that for now to limit
+    // the rate. By waiting for 256ms, we can derive our waits
+    // simply from the divider that is a 31st of 16us
+    let wait_for_echo = (div as u32) * 16 * 1000;
     defmt::error!("divider {} at {}", div, freq);
 
     let trigger_program = pio_proc::pio_asm!(
+        "pull block",
+        "mov x, osr",
         ".wrap_target",
         "set pins, 1 [31]",
-        "set pins, 0 [8]",
+        "set pins, 0 [31]",
+        "wait 1 pin 0",
+        "wait 0 pin 0 [31]",
         ".wrap"
     );
 
 
     // Initialize and start PIO
-    let (mut pio, sm0, sm1, _, _) = pac.PIO0.split(&mut pac.RESETS);
-    let x_controlled_pulse_installed = pio.install(&x_controlled_pulse.program).unwrap();
+    let (mut pio, trigger_sm, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
     let trigger_installed = pio.install(&trigger_program.program).unwrap();
     let (int, frac) = (div, 0); // as slow as possible (0 is interpreted as 65536)
-    let (mut trigger_sm, _, _) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
+    let (mut trigger_sm, _, mut trigger_tx) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
         .set_pins(trigger_pin, 1)
+        .in_pin_base(echo_pin)
+        .jmp_pin(echo_pin)
         .clock_divisor_fixed_point(int, frac)
-        .build(sm0);
+        .build(trigger_sm);
 
-    let (mut sm1, _, _) = rp2040_hal::pio::PIOBuilder::from_program(x_controlled_pulse_installed)
-        .set_pins(led_pin_id, 1)
-        .clock_divisor_fixed_point(int, frac)
-        .build(sm1);
+    trigger_sm.set_pindirs([(trigger_pin, hal::pio::PinDir::Output), (echo_pin, hal::pio::PinDir::Input)]);
+    let trigger_sm = trigger_sm.start();
 
-    trigger_sm.set_pindirs([(trigger_pin, hal::pio::PinDir::Output)]);
-    trigger_sm.start();
-
-
-    sm1.set_pindirs([(led_pin_id, hal::pio::PinDir::Output)]);
-    sm1.start();
     // PIO runs in background, independently from CPU
+    trigger_tx.write(wait_for_echo);
     loop {
         // if let Some(value) = rx0.read() {
         //     defmt::error!("got fifo value: {}", value);
         // }
         // let freq = clocks.system_clock.freq().raw();
-        // defmt::error!("clock: {}", freq);
+        defmt::error!("pos: {}", trigger_sm.instruction_address());
     }
 }
