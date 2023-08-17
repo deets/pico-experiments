@@ -54,7 +54,6 @@ fn main() -> ! {
     let echo_pin = 18;
     let trigger_pin = 17;
 
-    // Define some simple PIO program.
     // I want the pulse of 31 highs to be
     // ~16us. freq / 1000_000 is the number
     // of clocks for 1us, times 16 the number of clocks
@@ -63,16 +62,9 @@ fn main() -> ! {
     // TODO: currently I need an additional divider 2, why?
     let freq = clocks.system_clock.freq().raw();
     let div = (16 * freq / 1000_000 / 31 / 2) as u16;
-    // The spec says that in case no echo is received,
-    // we get a 200ms pulse. Let's use that for now to limit
-    // the rate. By waiting for 256ms, we can derive our waits
-    // simply from the divider that is a 31st of 16us
-    let wait_for_echo = (div as u32) * 16 * 1000;
     defmt::error!("divider {} at {}", div, freq);
 
     let trigger_program = pio_proc::pio_asm!(
-        "pull block",
-        "mov x, osr",
         ".wrap_target",
         "set pins, 1 [31]",
         "set pins, 0 [31]",
@@ -91,8 +83,8 @@ fn main() -> ! {
     // Initialize and start PIO
     let (mut pio, trigger_sm, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
     let trigger_installed = pio.install(&trigger_program.program).unwrap();
-    let (int, frac) = (div, 0); // as slow as possible (0 is interpreted as 65536)
-    let (mut trigger_sm, mut trigger_rx, mut trigger_tx) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
+    let (int, frac) = (div, 0);
+    let (mut trigger_sm, mut trigger_rx, _) = rp2040_hal::pio::PIOBuilder::from_program(trigger_installed)
         .set_pins(trigger_pin, 1)
         .in_pin_base(echo_pin)
         .jmp_pin(echo_pin)
@@ -102,8 +94,6 @@ fn main() -> ! {
     trigger_sm.set_pindirs([(trigger_pin, hal::pio::PinDir::Output), (echo_pin, hal::pio::PinDir::Input)]);
     trigger_sm.start();
 
-    // PIO runs in background, independently from CPU
-    trigger_tx.write(wait_for_echo);
     loop {
         if let Some(value) = trigger_rx.read() {
             // We have two instructions in the count loop,
